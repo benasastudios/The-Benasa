@@ -1,0 +1,24 @@
+# Benasa Studios robots.txt - Allow search engines full access
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /.env
+Disallow: /node_modules/
+Disallow: /.git/
+Disallow: /functions/
+Disallow: /dataconnect/
+
+# Allow Google-specific crawling for images
+User-agent: Googlebot-Image
+Allow: /
+
+# Allow Bing crawling
+User-agent: Bingbot
+Allow: /
+
+# Sitemap location (IMPORTANT for SEO)
+Sitemap: https://benasastudios.com/sitemap.xml
+
+# Crawl delay to prevent server overload
+Crawl-delay: 1
+Request-rate: 1/1s

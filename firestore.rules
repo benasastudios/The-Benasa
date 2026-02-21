@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return request.auth.token.admin == true;
+    }
+
+    // Partners: user-owned documents
+    match /partners/{partnerId} {
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.uid
+        && request.resource.data.keys().hasAll(['uid','name','email','referralCode']);
+
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.uid || isAdmin());
+
+      allow update: if isSignedIn() && (request.auth.uid == resource.data.uid || isAdmin());
+
+      allow delete: if isAdmin();
+    }
+
+    // Referral visits: only authenticated users may write visits; admins can read
+    match /referral_visits/{visitId} {
+      allow create: if isSignedIn();
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // Commission/payment records: admins only
+    match /commission_payments/{paymentId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Default: deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

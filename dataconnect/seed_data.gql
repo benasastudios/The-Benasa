@@ -1,0 +1,87 @@
+mutation CreateDemoData @transaction @auth(level: USER, insecureReason: "This operation is for seeding demo data, not for general use.") {
+  user_insertMany(data: [
+    {
+      id: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      username: "john_doe",
+      email: "john.doe@example.com",
+      passwordHash: "hashedpassword1",
+      displayName: "John Doe",
+      createdAt: "2023-01-01T10:00:00Z"
+    },
+    {
+      id: "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
+      username: "jane_smith",
+      email: "jane.smith@example.com",
+      passwordHash: "hashedpassword2",
+      displayName: "Jane Smith",
+      createdAt: "2023-01-02T11:00:00Z"
+    }
+  ])
+  event_insertMany(data: [
+    {
+      id: "c3d4e5f6-a7b8-9012-3456-7890abcdef12",
+      title: "Music Festival",
+      location: "Central Park",
+      eventDate: "2023-08-15T18:00:00Z",
+      organizerId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      description: "Annual music festival with various artists.",
+      eventPosterUrl: "https://example.com/music-poster.jpg",
+      ticketPrice: 75.00,
+      createdAt: "2023-07-01T09:00:00Z"
+    },
+    {
+      id: "d4e5f6a7-b8c9-0123-4567-890abcdef234",
+      title: "Tech Conference",
+      location: "Convention Center",
+      eventDate: "2023-09-20T09:00:00Z",
+      organizerId: "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
+      description: "A conference on the latest in technology.",
+      eventPosterUrl: "https://example.com/tech-poster.jpg",
+      ticketPrice: 200.00,
+      createdAt: "2023-08-01T10:00:00Z"
+    }
+  ])
+  media_insertMany(data: [
+    {
+      id: "e5f6a7b8-c9d0-1234-5678-90abcdef3456",
+      title: "Concert Highlights",
+      mediaType: "video",
+      mediaUrl: "https://example.com/concert-video.mp4",
+      ownerId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      tags: ["music", "live"],
+      createdAt: "2023-08-16T12:00:00Z"
+    },
+    {
+      id: "f6a7b8c9-d0e1-2345-6789-0abcdef45678",
+      title: "Conference Keynote",
+      mediaType: "audio",
+      mediaUrl: "https://example.com/keynote-audio.mp3",
+      ownerId: "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
+      tags: ["tech", "speech"],
+      createdAt: "2023-09-21T10:00:00Z"
+    }
+  ])
+  comment_insertMany(data: [
+    {
+      id: "g7h8i9j0-k1l2-3456-7890-abcdef567890",
+      content: "Great festival!",
+      authorId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      onEventId: "c3d4e5f6-a7b8-9012-3456-7890abcdef12",
+      createdAt: "2023-08-17T14:00:00Z"
+    },
+    {
+      id: "h8i9j0k1-l2m3-4567-8901-abcdef678901",
+      content: "Very informative talks.",
+      authorId: "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
+      onEventId: "d4e5f6a7-b8c9-0123-4567-890abcdef234",
+      createdAt: "2023-09-22T13:00:00Z"
+    }
+  ])
+  connection_insertMany(data: [
+    {
+      followerId: "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+      followedId: "b2c3d4e5-f6a7-8901-2345-67890abcdef0",
+      createdAt: "2023-01-05T10:00:00Z"
+    }
+  ])
+}

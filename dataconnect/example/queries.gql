@@ -1,0 +1,49 @@
+query ListRecentEvents @auth(level: PUBLIC, insecureReason: "This operation is safe to expose to the public as it only retrieves event information without user data.") {
+  events(orderBy: [{createdAt: DESC}], limit: 10) {
+    id
+    title
+    eventDate
+    location
+    eventPosterUrl
+    organizer {
+      displayName
+    }
+  }
+}
+
+query GetMyProfile @auth(level: USER) {
+  user(key: {id_expr: "auth.uid"}) {
+    id
+    username
+    displayName
+    email
+    profilePictureUrl
+    bio
+    createdAt
+  }
+}
+
+mutation CreateNewMedia($title: String, $description: String, $mediaType: String!, $mediaUrl: String!, $tags: [String!]) @auth(level: USER) {
+  media_insert(data: {
+    ownerId_expr: "auth.uid"
+    title: $title
+    description: $description
+    mediaType: $mediaType
+    mediaUrl: $mediaUrl
+    tags: $tags
+    createdAt_expr: "request.time"
+  }) {
+    id
+  }
+}
+
+mutation PostCommentOnMedia($mediaId: UUID!, $content: String!) @auth(level: USER) {
+  comment_insert(data: {
+    authorId_expr: "auth.uid"
+    onMediaId: $mediaId
+    content: $content
+    createdAt_expr: "request.time"
+  }) {
+    id
+  }
+}

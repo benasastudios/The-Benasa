@@ -1,0 +1,10 @@
+{
+  "name": "benasa-functions",
+  "version": "0.1.0",
+  "description": "Firebase Cloud Functions for Benasa Studios (admin claim management)",
+  "engines": { "node": "16" },
+  "dependencies": {
+    "firebase-admin": "^11.0.0",
+    "firebase-functions": "^4.0.0"
+  }
+}
