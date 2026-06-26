@@ -1,0 +1,26 @@
+# Ignore dependencies (fixes the 25 MiB asset too large error)
+node_modules/
+
+# Ignore backend functions and Firebase config
+firebase-functions/
+firebase.json
+.firebaserc
+dataconnect/
+
+# Ignore backend server and scripts
+server.js
+update_footer.py
+scripts/
+package.json
+package-lock.json
+
+# Ignore wrangler config so it isn't served publicly
+wrangler.jsonc
+wrangler.toml
+
+# Ignore documentation
+*.md
+
+# Ignore git
+.git/
+.github/
