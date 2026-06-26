@@ -75,16 +75,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Serve static files (fallback to index/dashboard)
+  // Serve static files (fallback to index)
   let filePath;
   if (req.url === '/') {
     filePath = path.join(__dirname, 'index.html');
-  } else if (req.url === '/dashboard') {
-    filePath = path.join(__dirname, 'dashboard.html');
   } else {
     // strip query string
     const cleanUrl = req.url.split('?')[0];
-    filePath = path.join(__dirname, decodeURIComponent(cleanUrl));
+    filePath = path.join(__dirname, cleanUrl);
   }
 
   const extname = String(path.extname(filePath)).toLowerCase();
@@ -93,16 +91,9 @@ const server = http.createServer((req, res) => {
   fs.readFile(filePath, (error, content) => {
     if (error) {
       if (error.code === 'ENOENT') {
-        // File not found, serve dashboard.html as fallback
-        fs.readFile(path.join(__dirname, 'dashboard.html'), (fallbackError, fallbackContent) => {
-          if (fallbackError) {
-            res.writeHead(500);
-            res.end('Server Error');
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end(fallbackContent, 'utf-8');
-        });
+        // File not found, serve 404
+        res.writeHead(404, { 'Content-Type': 'text/html' });
+        res.end('<h1>404 - Page Not Found</h1><p><a href="/">Return to homepage</a></p>');
       } else {
         res.writeHead(500);
         res.end('Server Error');
@@ -116,5 +107,4 @@ const server = http.createServer((req, res) => {
 
 server.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
-  console.log(`Dashboard available at http://localhost:${port}/dashboard`);
 });

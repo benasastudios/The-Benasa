@@ -118,7 +118,7 @@ curl -I https://benasastudios.com | grep -i "Strict\|X-Frame\|Content-Security"
 
 ### robots.txt
 Tells search engines which pages to crawl:
-- ✅ Allows crawling of public pages (/, /index.html, /dashboard.html)
+- ✅ Allows crawling of public pages (/, /index.html)
 - ✅ Disallows private paths (/admin, /.env, /functions)
 - ✅ Points to sitemap.xml location
 - ✅ Sets crawl delay (1 request per second)
@@ -128,7 +128,6 @@ Lists all important URLs for search engines:
 - Homepage (priority 1.0) - highest priority
 - Contact/Pricing (priority 0.9)
 - Services (priority 0.8)
-- Dashboard (priority 0.5) - internal use only
 - Privacy (priority 0.3) - legal page
 - Each entry includes:
   - Last modified date

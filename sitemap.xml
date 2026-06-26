@@ -52,23 +52,6 @@
     <mobile:mobile/>
   </url>
 
-  <!-- Alliance/Referral Program -->
-  <url>
-    <loc>https://benasastudios.com/#referral</loc>
-    <lastmod>2026-02-21</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <mobile:mobile/>
-  </url>
-
-  <!-- Dashboard (internal, lower priority for public indexing) -->
-  <url>
-    <loc>https://benasastudios.com/dashboard.html</loc>
-    <lastmod>2026-02-21</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.5</priority>
-  </url>
-
   <!-- Privacy Policy (required for SEO compliance) -->
   <url>
     <loc>https://benasastudios.com/#privacy</loc>

@@ -76,9 +76,23 @@
     }
     </script>
 
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome & Three.js -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Tailwind CSS for Responsive Design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'sans': ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
     
     <!-- Favicon (Emoji Fallback) -->
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22black%22/><text y=%22.9em%22 font-size=%2290%22 fill=%22white%22 font-weight=%22bold%22 x=%2220%22>B</text></svg>">
@@ -107,629 +121,8 @@
         db = firebase.firestore();
         auth = firebase.auth();
         analytics = firebase.analytics();
-        console.log('Firebase initialized successfully');
-
-        // Partner Tracking System
-        class PartnerTrackingSystem {
-            constructor() {
-                // Configuration
-                this.COLLECTIONS = {
-                    VISITS: 'referral_visits',
-                    PARTNERS: 'partners'
-                };
-                this.STORAGE = {
-                    VISITOR_ID: 'benasa_visitor_id',
-                    PARTNER_ID: 'benasa_partner_id',
-                    PARTNER_DATA: 'benasa_partner_data'
-                };
-
-                this.visitorId = this.getOrCreateVisitorId();
-                this.currentReferralCode = null;
-                this.partnerData = null;
-                this.trackingInitialized = false;
-                this.ipCache = null;
-            }
-
-            // Generate or retrieve unique visitor ID
-            getOrCreateVisitorId() {
-                let visitorId = localStorage.getItem(this.STORAGE.VISITOR_ID);
-                if (!visitorId) {
-                    visitorId = 'VISITOR_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    localStorage.setItem(this.STORAGE.VISITOR_ID, visitorId);
-                }
-                return visitorId;
-            }
-
-            // Get user IP address (with timeout and fallback)
-            async getUserIP() {
-                if (this.ipCache) return this.ipCache;
-
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-                    
-                    const response = await fetch('https://api.ipify.org?format=json', {
-                        signal: controller.signal
-                    });
-                    clearTimeout(timeoutId);
-                    
-                    if (!response.ok) throw new Error('IP fetch failed');
-
-                    const data = await response.json();
-                    this.ipCache = data.ip || 'unknown';
-                    return this.ipCache;
-                } catch (error) {
-                    console.warn('Could not fetch IP address, using fallback:', error);
-                    return 'unknown';
-                }
-            }
-
-            // Check for referral code in URL
-            checkReferralCode() {
-                const urlParams = new URLSearchParams(window.location.search);
-                const referralCode = urlParams.get('ref');
-                if (referralCode) {
-                    // SECURITY: Validate referral code format before processing
-                    if (this._isValidReferralCode(referralCode)) {
-                        this.currentReferralCode = referralCode;
-                        this.trackReferralClick(referralCode);
-                    } else {
-                        console.warn('Invalid referral code format detected:', referralCode);
-                    }
-                }
-            }
-            
-            // Validate referral code format - prevents injection attacks
-            _isValidReferralCode(code) {
-                // Format: BENASA-XXXXXX (must start with BENASA-, followed by 6+ alphanumeric chars)
-                // Max 20 chars total to prevent abuse
-                const referralRegex = /^BENASA-[A-Z0-9]{6,}$/;
-                return code && referralRegex.test(code) && code.length <= 20;
-            }
-
-            // Track referral click (unique visitor tracking)
-            async trackReferralClick(referralCode) {
-                if (this.trackingInitialized) return;
-                
-                const userIP = await this.getUserIP();
-                const timestamp = new Date().toISOString();
-                
-                try {
-                    // Check if this visitor/IP combination already exists for this referral
-                    const existingVisitQuery = await db.collection(this.COLLECTIONS.VISITS)
-                        .where('referralCode', '==', referralCode)
-                        .where('visitorId', '==', this.visitorId)
-                        .where('userIP', '==', userIP)
-                        .limit(1)
-                        .get();
-
-                    if (existingVisitQuery.empty) {
-                        // New unique visitor - log the impression
-                        await db.collection(this.COLLECTIONS.VISITS).add({
-                            referralCode: referralCode,
-                            visitorId: this.visitorId,
-                            userIP: userIP,
-                            timestamp: timestamp,
-                            userAgent: navigator.userAgent,
-                            converted: false,
-                            conversionValue: 0,
-                            commissionEarned: 0
-                        });
-
-                        // Update partner stats
-                        await this.updatePartnerStats(referralCode, 'uniqueClick');
-                        
-                        console.log('Unique visitor tracked for referral:', referralCode);
-                    } else {
-                        console.log('Returning visitor - not counting as unique');
-                    }
-                    
-                    this.trackingInitialized = true;
-                } catch (error) {
-                    console.error('Error tracking referral:', error);
-                }
-            }
-
-            // Update partner statistics
-            async updatePartnerStats(referralCode, action, amount = 0) {
-                try {
-                    const partnerDoc = await db.collection(this.COLLECTIONS.PARTNERS).where('referralCode', '==', referralCode).limit(1).get();
-                    
-                    if (!partnerDoc.empty) {
-                        const partnerId = partnerDoc.docs[0].id;
-                        const partnerData = partnerDoc.docs[0].data();
-                        
-                        if (action === 'uniqueClick') {
-                            partnerData.stats.uniqueClicks = (partnerData.stats.uniqueClicks || 0) + 1;
-                            partnerData.stats.lastActivity = new Date().toISOString();
-                        } else if (action === 'conversion') {
-                            partnerData.stats.conversions = (partnerData.stats.conversions || 0) + 1;
-                            partnerData.stats.totalEarned = (partnerData.stats.totalEarned || 0) + amount;
-                            partnerData.stats.lastActivity = new Date().toISOString();
-                        }
-
-                        // Update Firebase
-                        const partnerRef = db.collection(this.COLLECTIONS.PARTNERS).doc(partnerId);
-                        await partnerRef.update(partnerData);
-                    }
-                } catch (error) {
-                    console.error('Error updating partner stats:', error);
-                }
-            }
-
-            // Partner registration with Firebase Authentication
-            async registerPartner(partnerInfo) {
-                console.log('=== PARTNER REGISTRATION START ===');
-                try {
-                    // 1. Create Auth User
-                    const userCredential = await this._createAuthUser(partnerInfo.email, partnerInfo.password);
-                    const uid = userCredential.user.uid;
-                    
-                    // 2. Prepare Data
-                    const partnerData = await this._preparePartnerData(uid, partnerInfo);
-                    
-                    // 3. Save to Firestore
-                    await this._savePartnerData(uid, partnerData);
-                    
-                    // 4. Initialize Session
-                    this._setLocalSession(uid, partnerData);
-                    
-                    console.log('=== PARTNER REGISTRATION SUCCESS ===');
-                    return { success: true, partnerId: uid, partnerData };
-                } catch (error) {
-                    console.error('=== PARTNER REGISTRATION ERROR ===');
-                    console.error('Error registering partner:', error);
-                    return { success: false, error: this._formatAuthError(error) };
-                }
-            }
-
-            // Helper: Create Auth User
-            async _createAuthUser(email, password) {
-                console.log('1. Creating Firebase Auth user...');
-                const credential = await auth.createUserWithEmailAndPassword(email, password);
-                console.log('2. Firebase Auth user created, ID:', credential.user.uid);
-                return credential;
-            }
-
-            // Helper: Prepare Partner Data Object
-            async _preparePartnerData(uid, info) {
-                console.log('3. Generating referral code...');
-                
-                // IMPROVED: Better referral code uniqueness with robust fallback
-                let referralCode;
-                let isUnique = false;
-                let attempts = 0;
-                
-                while (!isUnique && attempts < 5) {
-                    // Generate code: BENASA-XXXXXX (6 alphanumeric chars)
-                    const randomPart = Math.random().toString(36).substr(2, 6).toUpperCase();
-                    referralCode = 'BENASA-' + randomPart;
-                    
-                    try {
-                        const snapshot = await db.collection(this.COLLECTIONS.PARTNERS)
-                            .where('referralCode', '==', referralCode)
-                            .limit(1)
-                            .get();
-                        
-                        if (snapshot.empty) {
-                            isUnique = true;
-                        } else {
-                            console.log('Referral code collision, retrying...');
-                        }
-                    } catch (e) {
-                        console.warn('Error checking referral code uniqueness:', e);
-                        // Fallback: Timestamp + random + UID suffix for guaranteed uniqueness
-                        const timestamp = Date.now().toString(36).toUpperCase().slice(-3);
-                        const random = Math.random().toString(36).substr(2, 2).toUpperCase();
-                        const uidSuffix = uid.slice(-1).toUpperCase();
-                        referralCode = 'BENASA-' + timestamp + random + uidSuffix;
-                        isUnique = true;
-                    }
-                    attempts++;
-                }
-                
-                if (!isUnique) {
-                    throw new Error('Could not generate unique referral code after 5 attempts');
-                }
-                
-                console.log('4. Getting user IP...');
-                const userIP = await this.getUserIP();
-                
-                console.log('5. Creating partner data structure...');
-                // SECURITY: Sanitize all input to prevent XSS, track privacy consent
-                return {
-                    uid: uid,
-                    name: sanitizeInput(info.name),
-                    email: sanitizeInput(info.email),
-                    phone: sanitizeInput(info.phone),
-                    company: sanitizeInput(info.company),
-                    referralCode: referralCode,
-                    registrationIP: userIP,
-                    registrationDate: new Date().toISOString(),
-                    privacyConsent: info.privacyConsent === true,  // Track if user consented to IP tracking
-                    status: 'active',
-                    stats: {
-                        uniqueClicks: 0,
-                        conversions: 0,
-                        totalEarned: 0,
-                        lastActivity: new Date().toISOString()
-                    },
-                    marketingMaterials: {
-                        referralLink: `https://benasastudios.com/?ref=${referralCode}`,
-                        shareableLink: `https://benasastudios.com/partner/${referralCode}`,
-                        customMessages: [
-                            `Check out Benasa Studios - your remote creative department. Use my code ${referralCode} for special benefits!`,
-                            `I've been working with Benasa Studios and they're amazing. Use my referral code ${referralCode} to get started!`
-                        ]
-                    }
-                };
-            }
-
-            // Helper: Save to Firestore
-            async _savePartnerData(uid, data) {
-                console.log('6. Adding to Firestore database...');
-                await db.collection(this.COLLECTIONS.PARTNERS).doc(uid).set(data);
-                console.log('7. Database add successful');
-            }
-
-            // Helper: Set Local Session
-            _setLocalSession(uid, data) {
-                console.log('8. Storing to localStorage...');
-                // SECURITY: Only store partner ID in localStorage
-                // This prevents XSS vulnerabilities from exposing sensitive partner data
-                // Partner data will be fetched from Firestore on each page load
-                localStorage.setItem(this.STORAGE.PARTNER_ID, uid);
-                
-                // Store only non-sensitive marketing link (not full partner data)
-                const safeMaterialsOnly = {
-                    referralLink: data.marketingMaterials.referralLink,
-                    referralCode: data.referralCode
-                };
-                localStorage.setItem(this.STORAGE.PARTNER_DATA, JSON.stringify(safeMaterialsOnly));
-                this.partnerData = data;
-            }
-
-            // Helper: Format Auth Errors
-            _formatAuthError(error) {
-                let errorMessage = error.message;
-                if (error.code === 'auth/email-already-in-use') {
-                    errorMessage = 'This email is already registered. Please login instead.';
-                } else if (error.code === 'auth/weak-password') {
-                    errorMessage = 'Password should be at least 6 characters long.';
-                } else if (error.code === 'auth/invalid-email') {
-                    errorMessage = 'Please enter a valid email address.';
-                }
-                return errorMessage;
-            }
-
-            // Partner login with Firebase Authentication
-            async loginPartner(email, password) {
-                try {
-                    console.log('1. Signing in with Firebase Auth...');
-                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
-                    console.log('2. Firebase Auth successful, UID:', userCredential.user.uid);
-                    
-                    console.log('3. Getting partner data from Firestore...');
-                    const partnerDoc = await db.collection(this.COLLECTIONS.PARTNERS).doc(userCredential.user.uid).get();
-                    
-                    if (partnerDoc.exists) {
-                        const partnerData = partnerDoc.data();
-                        
-                        this._setLocalSession(userCredential.user.uid, partnerData);
-                        
-                        console.log('4. Login successful');
-                        return { success: true, partnerId: userCredential.user.uid, partnerData };
-                    } else {
-                        console.log('4. Partner data not found in Firestore');
-                        return { success: false, error: 'Partner account not found' };
-                    }
-                } catch (error) {
-                    console.error('Error logging in partner:', error);
-                    
-                    // Handle specific Firebase Auth errors
-                    let errorMessage = error.message;
-                    if (error.code === 'auth/user-not-found') {
-                        errorMessage = 'No account found with this email address.';
-                    } else if (error.code === 'auth/wrong-password') {
-                        errorMessage = 'Incorrect password. Please try again.';
-                    } else if (error.code === 'auth/invalid-email') {
-                        errorMessage = 'Please enter a valid email address.';
-                    } else if (error.code === 'auth/user-disabled') {
-                        errorMessage = 'This account has been disabled.';
-                    } else if (error.code === 'auth/too-many-requests') {
-                        errorMessage = 'Too many failed attempts. Please try again later.';
-                    }
-                    
-                    return { success: false, error: errorMessage };
-                }
-            }
-
-            // Check if partner is logged in
-            isPartnerLoggedIn() {
-                return localStorage.getItem(this.STORAGE.PARTNER_ID) !== null;
-            }
-
-            // Get current partner data
-            getCurrentPartner() {
-                const partnerData = localStorage.getItem(this.STORAGE.PARTNER_DATA);
-                return partnerData ? JSON.parse(partnerData) : null;
-            }
-
-            // Track conversion
-            async trackConversion(value = 0) {
-                if (!this.currentReferralCode) return;
-                
-                const userIP = await this.getUserIP();
-                const timestamp = new Date().toISOString();
-                
-                try {
-                    // Find the visit record and update it
-                    const visitQuery = await db.collection(this.COLLECTIONS.VISITS)
-                        .where('referralCode', '==', this.currentReferralCode)
-                        .where('visitorId', '==', this.visitorId)
-                        .where('userIP', '==', userIP)
-                        .limit(1)
-                        .get();
-
-                    if (!visitQuery.empty) {
-                        const visitDoc = visitQuery.docs[0];
-                        
-                        // SECURITY CRITICAL: Commission calculation MUST happen on server (Cloud Function)
-                        // NOT on the client to prevent manipulation. This is a placeholder.
-                        // TODO: Call Firestore Cloud Function to calculate and update commission
-                        // For security, we set commissionEarned to 0 here and let the backend calculate
-                        const commissionAmount = 0; // Backend will calculate via Cloud Function
-                        
-                        await visitDoc.ref.update({
-                            converted: true,
-                            conversionValue: value,
-                            conversionDate: timestamp,
-                            commissionEarned: commissionAmount,
-                            // Flag for backend to process
-                            requiresCommissionCalculation: true
-                        });
-
-                        // Update partner stats
-                        await this.updatePartnerStats(this.currentReferralCode, 'conversion', commissionAmount);
-                        
-                        console.log('Conversion tracked for referral:', this.currentReferralCode);
-                    }
-                } catch (error) {
-                    console.error('Error tracking conversion:', error);
-                }
-            }
-
-            // Initialize tracking system
-            async initialize() {
-                this.checkReferralCode();
-                
-                // If partner is logged in, load their data
-                if (this.isPartnerLoggedIn()) {
-                    this.partnerData = this.getCurrentPartner();
-                }
-            }
-        }
-
-        // ========== SECURITY & VALIDATION HELPERS ==========
-        // Input validation helpers
-        function validateEmail(email) {
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            return emailRegex.test(email);
-        }
-        
-        function validateName(name) {
-            return name.trim().length >= 2 && name.length <= 100;
-        }
-        
-        function validatePhone(phone) {
-            const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s.]?[(]?[0-9]{1,4}[)]?[-\s.]?[0-9]{1,9}$/;
-            return phoneRegex.test(phone.replace(/\s/g, ''));
-        }
-        
-        function validatePassword(password) {
-            // At least 8 chars, 1 uppercase, 1 number
-            return password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password);
-        }
-        
-        // Rate limiting helper - prevents abuse
-        const rateLimitMap = new Map();
-        function checkRateLimit(key, maxAttempts = 5, windowMs = 300000) { // 5 min window
-            const now = Date.now();
-            const record = rateLimitMap.get(key) || { count: 0, resetTime: now + windowMs };
-            
-            if (now > record.resetTime) {
-                record.count = 0;
-                record.resetTime = now + windowMs;
-            }
-            
-            if (record.count >= maxAttempts) {
-                return false;
-            }
-            
-            record.count++;
-            rateLimitMap.set(key, record);
-            return true;
-        }
-        
-        // Sanitize input to prevent XSS
-        function sanitizeInput(input) {
-            const div = document.createElement('div');
-            div.textContent = input;
-            return div.innerHTML;
-        }
-
-        // Initialize tracking system
-        const trackingSystem = new PartnerTrackingSystem();
-        window.trackingSystem = trackingSystem; // Make globally accessible
-
-        // Make registerPartner globally accessible
-        window.registerPartner = async function() {
-            console.log('=== REGISTER PARTNER START ===');
-            
-            // SECURITY: Rate limiting - prevent spam/brute force
-            const clientIP = 'local_' + navigator.userAgent.slice(0, 20);
-            if (!checkRateLimit(clientIP, 3, 600000)) { // Max 3 registrations per 10 minutes
-                alert('Too many registration attempts. Please try again later.');
-                return;
-            }
-            
-            // Disable button to prevent multiple submissions
-            const submitBtn = document.querySelector('button[onclick="window.registerPartner()"]');
-            const originalText = submitBtn.innerText;
-            submitBtn.disabled = true;
-            submitBtn.innerText = 'Creating Account...';
-
-            try {
-                // Check if trackingSystem exists
-                if (!window.trackingSystem) {
-                    console.error('trackingSystem not found');
-                    alert('System error: trackingSystem not available');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-                console.log('trackingSystem found:', trackingSystem);
-                
-                const name = document.getElementById('partner-name').value;
-                const email = document.getElementById('partner-email').value;
-                const phone = document.getElementById('partner-phone').value;
-                const company = document.getElementById('partner-company').value;
-                const password = document.getElementById('partner-password').value;
-                const termsAccepted = document.getElementById('terms-accepted').checked;
-                const privacyConsent = document.getElementById('privacy-consent').checked;
-
-                console.log('Form values:', { name, email, phone, company, termsAccepted, privacyConsent });
-
-                // SECURITY: Input validation
-                if (!name || !email || !phone || !password) {
-                    console.log('Validation failed: missing required fields');
-                    alert('Please fill in all required fields');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                // Validate email format
-                if (!validateEmail(email)) {
-                    alert('Please enter a valid email address');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                // Validate name
-                if (!validateName(name)) {
-                    alert('Name must be between 2 and 100 characters');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                // Validate phone
-                if (!validatePhone(phone)) {
-                    alert('Please enter a valid phone number');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                // Validate password
-                if (!validatePassword(password)) {
-                    alert('Password must be at least 8 characters with 1 uppercase letter and 1 number');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                if (!termsAccepted) {
-                    console.log('Validation failed: terms not accepted');
-                    alert('Please accept the terms and conditions');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                if (!privacyConsent) {
-                    console.log('Validation failed: privacy consent not given');
-                    alert('Please accept the privacy policy to continue');
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                    return;
-                }
-
-                console.log('Validation passed, calling trackingSystem.registerPartner...');
-                
-                const result = await trackingSystem.registerPartner({
-                    name,
-                    email,
-                    phone,
-                    company,
-                    password,
-                    termsAccepted,
-                    privacyConsent
-                });
-
-                console.log('Registration result:', result);
-
-                if (result.success) {
-                    console.log('Registration successful, showing dashboard');
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const referrerCode = urlParams.get('ref');
-                    if (referrerCode) {
-                        console.log('Referral source detected:', referrerCode);
-                        localStorage.setItem('attributedReferrer', referrerCode);
-                    }
-                    showSuccessMessage('Account created! Redirecting to dashboard...');
-                    setTimeout(() => showPartnerDashboard(result.partnerData), 1500);
-                } else {
-                    console.log('Registration failed:', result.error);
-                    showErrorMessage('Registration failed: ' + result.error);
-                    submitBtn.disabled = false;
-                    submitBtn.innerText = originalText;
-                }
-            } catch (error) {
-                console.error('Registration error:', error);
-                alert('Registration failed: ' + error.message);
-                submitBtn.disabled = false;
-                submitBtn.innerText = originalText;
-            }
-            
-            console.log('=== REGISTER PARTNER END ===');
-        }
-
-        // Make loginPartner globally accessible
-        window.loginPartner = async function() {
-            console.log('=== LOGIN PARTNER START ===');
-            
-            // Get form values
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
-            
-            if (!email || !password) {
-                alert('Please fill in all fields');
-                return;
-            }
-            
-            try {
-                console.log('Attempting login with trackingSystem...');
-                const result = await trackingSystem.loginPartner(email, password);
-                
-                if (result.success) {
-                    console.log('Login successful, showing dashboard');
-                    showPartnerDashboard(result.partnerData);
-                } else {
-                    console.log('Login failed:', result.error);
-                    alert('Login failed: ' + result.error);
-                }
-            } catch (error) {
-                console.error('Login error:', error);
-                alert('Login failed: ' + error.message);
-            }
-            
-            console.log('=== LOGIN PARTNER END ===');
-        }
     </script>
-
+    
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200;300;400;600;700;800&display=swap');
         
@@ -839,22 +232,6 @@
             padding: 4px 12px;
             border-radius: 2px;
             border: 1px solid currentColor;
-        }
-
-        .earn-badge {
-            background: var(--text);
-            color: var(--bg);
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            font-size: 0.8125rem;
-            font-weight: 600;
-            letter-spacing: -0.01em;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        .earn-badge:hover {
-            opacity: 0.9;
         }
 
         #hero-canvas {
@@ -1000,62 +377,269 @@
             animation: drift 20s ease-in-out infinite;
         }
 
-        /* Modal (Alliance) */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 60;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.6);
-            align-items: center;
-            justify-content: center;
-            padding: 2rem;
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            .section-padding {
+                padding: 4rem 1rem;
+            }
+            
+            h1 {
+                font-size: 2.5rem !important;
+                line-height: 1.1 !important;
+            }
+            
+            h2 {
+                font-size: 2rem !important;
+            }
+            
+            .text-6xl {
+                font-size: 3rem !important;
+            }
+            
+            .text-5xl {
+                font-size: 2.5rem !important;
+            }
+            
+            .text-4xl {
+                font-size: 2rem !important;
+            }
+            
+            .text-3xl {
+                font-size: 1.5rem !important;
+            }
+            
+            .text-2xl {
+                font-size: 1.25rem !important;
+            }
+            
+            .text-xl {
+                font-size: 1.125rem !important;
+            }
+            
+            .max-w-4xl {
+                max-width: 100% !important;
+            }
+            
+            .max-w-7xl {
+                padding: 0 1rem !important;
+            }
+            
+            .px-6 {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+            
+            .px-12 {
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+            
+            .py-40 {
+                padding-top: 4rem !important;
+                padding-bottom: 4rem !important;
+            }
+            
+            .py-32 {
+                padding-top: 3rem !important;
+                padding-bottom: 3rem !important;
+            }
+            
+            .py-20 {
+                padding-top: 2rem !important;
+                padding-bottom: 2rem !important;
+            }
+            
+            .gap-24 {
+                gap: 2rem !important;
+            }
+            
+            .gap-20 {
+                gap: 1.5rem !important;
+            }
+            
+            .grid-cols-3,
+            .grid-cols-2,
+            .grid-cols-4,
+            .md\:grid-cols-3,
+            .md\:grid-cols-2,
+            .md\:grid-cols-4,
+            .lg\:grid-cols-4,
+            .lg\:grid-cols-3 {
+                grid-template-columns: 1fr !important;
+            }
+            
+            .hidden {
+                display: none !important;
+            }
+            
+            .md\:flex {
+                display: none !important;
+            }
+            
+            .flex-col {
+                flex-direction: column !important;
+            }
+            
+            .space-x-12 > * + * {
+                margin-left: 0 !important;
+                margin-top: 1rem !important;
+            }
+            
+            .space-x-8 > * + * {
+                margin-left: 0 !important;
+                margin-top: 0.5rem !important;
+            }
+            
+            .space-x-3 > * + * {
+                margin-left: 0 !important;
+                margin-top: 0.25rem !important;
+            }
+            
+            .text-center {
+                text-align: center !important;
+            }
+            
+            .p-8 {
+                padding: 1.5rem !important;
+            }
+            
+            .p-12 {
+                padding: 2rem !important;
+            }
+            
+            .mb-12,
+            .mb-20,
+            .mb-16,
+            .mb-10,
+            .mb-8,
+            .mb-6,
+            .mb-4 {
+                margin-bottom: 1rem !important;
+            }
+            
+            .mt-12,
+            .mt-10,
+            .mt-8,
+            .mt-6 {
+                margin-top: 1rem !important;
+            }
+            
+            .min-h-screen {
+                min-height: 100vh !important;
+                padding-top: 5rem !important;
+            }
+            
+            .btn-black {
+                padding: 1rem 1.5rem !important;
+                font-size: 0.75rem !important;
+            }
+            
+            .pricing-toggle {
+                flex-direction: column !important;
+                width: 100% !important;
+                margin: 2rem 0 !important;
+            }
+            
+            .currency-btn {
+                width: 100% !important;
+                text-align: center !important;
+            }
+            
+            .grid.grid-cols-2.gap-6 {
+                grid-template-columns: 1fr !important;
+                gap: 1rem !important;
+            }
+            
+            .comparison table {
+                font-size: 0.75rem !important;
+            }
+            
+            .comparison th,
+            .comparison td {
+                padding: 0.5rem !important;
+            }
+            
+            .testimonial-slide {
+                min-width: 100% !important;
+            }
+            
+            #promo-modal .max-w-md {
+                max-width: 95% !important;
+                margin: 1rem !important;
+            }
+            
+            #promo-modal .p-8 {
+                padding: 1.5rem !important;
+            }
+            
+            #promo-modal .text-2xl {
+                font-size: 1.5rem !important;
+            }
+            
+            #promo-modal .text-3xl {
+                font-size: 2rem !important;
+            }
+            
+            #promo-modal .flex.space-x-3 {
+                flex-direction: column !important;
+                gap: 0.75rem !important;
+            }
+            
+            #promo-modal .flex.space-x-3 > * {
+                width: 100% !important;
+            }
+            
+            /* Mobile Menu Animation */
+            #mobile-menu-btn.active span:nth-child(1) {
+                transform: rotate(45deg) translate(5px, 5px);
+            }
+            
+            #mobile-menu-btn.active span:nth-child(2) {
+                opacity: 0;
+            }
+            
+            #mobile-menu-btn.active span:nth-child(3) {
+                transform: rotate(-45deg) translate(7px, -6px);
+            }
         }
-        .modal[style*="display: block"] {
-            display: flex !important;
+
+        @media (min-width: 641px) and (max-width: 768px) {
+            .section-padding {
+                padding: 6rem 1.5rem;
+            }
+            
+            h1 {
+                font-size: 3.5rem !important;
+            }
+            
+            .text-6xl {
+                font-size: 4rem !important;
+            }
+            
+            .text-5xl {
+                font-size: 3rem !important;
+            }
+            
+            .grid-cols-3,
+            .grid-cols-4,
+            .md\:grid-cols-3,
+            .md\:grid-cols-2,
+            .md\:grid-cols-4 {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
         }
-        .modal-content {
-            background: var(--bg);
-            color: var(--text);
-            border-radius: 12px;
-            max-width: 760px;
-            width: 100%;
-            max-height: 90vh;
-            overflow-y: auto;
-            padding: 2rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-            position: relative;
+
+        @media (min-width: 769px) and (max-width: 1024px) {
+            .section-padding {
+                padding: 7rem 2rem;
+            }
+            
+            .grid-cols-4,
+            .lg\:grid-cols-4 {
+                grid-template-columns: repeat(3, 1fr) !important;
+            }
         }
-        .modal-content::-webkit-scrollbar {
-            width: 8px;
-        }
-        .modal-content::-webkit-scrollbar-track {
-            background: var(--bg);
-            border-radius: 10px;
-        }
-        .modal-content::-webkit-scrollbar-thumb {
-            background: var(--border);
-            border-radius: 10px;
-        }
-        .modal-content::-webkit-scrollbar-thumb:hover {
-            background: var(--text);
-        }
-        .modal-close {
-            position: absolute;
-            right: 1rem;
-            top: 1rem;
-            background: transparent;
-            border: none;
-            font-size: 1.5rem;
-            cursor: pointer;
-            font-weight: 300;
-        }
-        .modal-close:hover {
-            opacity: 0.6;
-        }
+
     </style>
 </head>
 <body class="antialiased">
@@ -1108,13 +692,83 @@
                     <a href="#about" class="hover:text-black transition" onclick="showPage('home')">Story</a>
                     <a href="#contact" onclick="showPage('home')" class="hover:text-black transition">Connect</a>
                 </div>
-
-                <div class="flex items-center space-x-6">
-                    <div class="earn-badge" onclick="openModal()">Earn 10%</div>
+                
+                <!-- Mobile Menu Button -->
+                <button id="mobile-menu-btn" class="md:hidden flex flex-col space-y-1.5" onclick="toggleMobileMenu()">
+                    <span class="w-6 h-0.5 bg-black transition-all"></span>
+                    <span class="w-6 h-0.5 bg-black transition-all"></span>
+                    <span class="w-6 h-0.5 bg-black transition-all"></span>
+                </button>
+            </div>
+            
+            <!-- Mobile Menu -->
+            <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-black/5">
+                <div class="px-6 py-4 space-y-3">
+                    <a href="#model" class="block py-2 font-semibold text-[0.8rem] uppercase tracking-widest text-neutral-500 hover:text-black transition" onclick="showPage('home'); toggleMobileMenu()">Model</a>
+                    <a href="#services" class="block py-2 font-semibold text-[0.8rem] uppercase tracking-widest text-neutral-500 hover:text-black transition" onclick="showPage('home'); toggleMobileMenu()">Units</a>
+                    <a href="#pricing" class="block py-2 font-semibold text-[0.8rem] uppercase tracking-widest text-neutral-500 hover:text-black transition" onclick="showPage('home'); toggleMobileMenu()">Tiers</a>
+                    <a href="#about" class="block py-2 font-semibold text-[0.8rem] uppercase tracking-widest text-neutral-500 hover:text-black transition" onclick="showPage('home'); toggleMobileMenu()">Story</a>
+                    <a href="#contact" class="block py-2 font-semibold text-[0.8rem] uppercase tracking-widest text-neutral-500 hover:text-black transition" onclick="showPage('home'); toggleMobileMenu()">Connect</a>
                 </div>
             </div>
         </div>
     </nav>
+
+    <!-- March Promo Banner Modal -->
+    <div id="promo-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white max-w-md w-full rounded-lg shadow-2xl relative">
+            <button onclick="closePromoModal()" class="absolute top-4 right-4 text-neutral-400 hover:text-black transition">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+            
+            <div class="p-8">
+                <div class="text-center mb-6">
+                    <span class="inline-block bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full mb-4">MARCH SPECIAL</span>
+                    <h2 class="text-2xl font-extrabold mb-4">Website Launch Package</h2>
+                    <div class="text-3xl font-black text-black mb-2">₵800</div>
+                    <p class="text-sm text-neutral-600">Limited time offer - March only</p>
+                </div>
+                
+                <div class="space-y-3 mb-6 text-sm">
+                    <div class="flex items-start space-x-3">
+                        <span class="text-green-500 font-bold">✓</span>
+                        <span>48-hour website development</span>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <span class="text-green-500 font-bold">✓</span>
+                        <span>3 standard pages included</span>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <span class="text-green-500 font-bold">✓</span>
+                        <span>Domain registration (1 year)</span>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <span class="text-green-500 font-bold">✓</span>
+                        <span>Web hosting (12 months)</span>
+                    </div>
+                </div>
+                
+                <div class="border-t border-neutral-200 pt-4 mb-6">
+                    <p class="text-xs text-neutral-500 mb-2">
+                        <strong>Terms:</strong> Beyond package scope attracts extra fees. 
+                        Client to provide content and resources. T&Cs apply.
+                    </p>
+                </div>
+                
+                <div class="flex space-x-3">
+                    <a href="https://wa.me/233554116131?text=Hi%20Benasa%20Studios,%20I'm%20interested%20in%20the%20March%20Website%20Launch%20Package%20for%20₵800" 
+                       target="_blank" 
+                       class="flex-1 bg-black text-white text-center py-3 px-4 text-sm font-bold uppercase tracking-widest hover:bg-neutral-800 transition">
+                        Claim Offer
+                    </a>
+                    <button onclick="closePromoModal()" 
+                            class="flex-1 border border-black text-black text-center py-3 px-4 text-sm font-bold uppercase tracking-widest hover:bg-black hover:text-white transition">
+                        Maybe Later
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- MAIN HOME PAGE -->
     <main id="home-page" class="page-transition" role="main">
@@ -1251,7 +905,7 @@
                         <div>
                             <h4 class="text-[0.6rem] font-bold uppercase tracking-[0.3em] text-neutral-500 mb-6">Starter</h4>
                             <div class="mb-6">
-                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵1,599" data-price-usd="$120" data-price-ngn="₦20,000">₵1,599</span>
+                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵699" data-price-usd="$66" data-price-ngn="₦8,039">₵699</span>
                                 <p class="text-[0.65rem] text-neutral-400 mt-2 uppercase tracking-wide">Fix</p>
                             </div>
                             <ul class="space-y-3 text-[0.7rem] text-neutral-400 font-light border-t border-white/5 pt-6">
@@ -1270,7 +924,7 @@
                         <div>
                             <h4 class="text-[0.6rem] font-bold uppercase tracking-[0.3em] text-neutral-500 mb-6">Standard</h4>
                             <div class="mb-6">
-                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵6,995" data-price-usd="$499" data-price-ngn="₦87,500">₵6,995</span>
+                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵1,299" data-price-usd="$122" data-price-ngn="₦14,939">₵1,299</span>
                                 <p class="text-[0.65rem] text-neutral-400 mt-2 uppercase tracking-wide">Reliable / Monthly</p>
                             </div>
                             <ul class="space-y-3 text-[0.7rem] text-neutral-400 font-light border-t border-white/5 pt-6">
@@ -1294,7 +948,7 @@
                         <div>
                             <h4 class="text-[0.6rem] font-bold uppercase tracking-[0.3em] text-neutral-400 mb-6">Plus</h4>
                             <div class="mb-6">
-                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵11,995" data-price-usd="$899" data-price-ngn="₦150,000">₵11,995</span>
+                                <span class="text-2xl font-extrabold price-val" data-price-ghs="₵1,599" data-price-usd="$150" data-price-ngn="₦18,389">₵1,599</span>
                                 <p class="text-[0.65rem] text-neutral-600 mt-2 uppercase tracking-wide">Acceleration / Monthly</p>
                             </div>
                             <ul class="space-y-3 text-[0.7rem] text-neutral-600 font-light border-t border-black/5 pt-6">
@@ -1343,23 +997,16 @@
                 <div class="max-w-4xl mx-auto">
                     <span class="tag text-neutral-400 mb-8 inline-block">The Benasa Ethos</span>
                     <h2 class="text-4xl md:text-5xl font-extrabold mb-12 tracking-tighter leading-tight">African Craft. Global Scale.</h2>
-                    <div class="grid md:grid-cols-2 gap-16 text-neutral-500 font-light leading-relaxed">
-                        <p>Based in Accra, we operate at the intersection of cultural creativity and technical precision. We bridge the gap between "outsourcing" and "integration." Benasa Studios was founded on the belief that your creative partner should be as close as the desk next to you.</p>
-                        <p>We are a high-performing bridge. We blend Ghana's rich heritage of design with the world's most modern workflows to ensure your brand never stops moving forward.</p>
+                    <div class="space-y-8 text-neutral-600 font-light leading-relaxed text-lg">
+                        <p>Founded in Accra, Ghana, Benasa Studios represents the convergence of African creative excellence and global digital innovation. We bridge continents, cultures, and capabilities to deliver world-class design and technology solutions.</p>
+                        
+                        <p>Our approach is rooted in the principle that great creative work should be both accessible and exceptional. We've built a system that combines the talent and perspective of African creatives with the standards and processes demanded by global brands.</p>
+                        
+                        <p>From our base in West Africa, we serve clients across the UK, US, Nigeria, Kenya, Canada, and beyond. Our distributed model allows us to provide 24/7 creative coverage while maintaining the personal touch and cultural understanding that sets our work apart.</p>
                     </div>
                 </div>
             </div>
         </section>
-
-        <!-- Referral -->
-        <section class="py-32 bg-neutral-50 px-6 relative overflow-hidden">
-            <div class="max-w-5xl mx-auto text-center relative z-10">
-                <h2 class="text-4xl font-extrabold mb-6 tracking-tighter">Join the Alliance.</h2>
-                <p class="text-neutral-400 mb-10 text-lg font-light">Partner with us and earn rewards while growing our creative ecosystem.</p>
-                <button onclick="showPage('referral')" class="btn-black px-12 py-5 text-[0.8rem] font-bold uppercase tracking-widest min-w-[300px]">Enter Alliance Portal</button>
-            </div>
-        </section>
-    </main>
 
     <!-- LEGAL PAGES -->
     <div id="legal-page" class="hidden-page page-transition bg-white min-h-screen pt-32 pb-20 px-6">
@@ -1401,8 +1048,8 @@
                     <p>We collect only the data necessary to provide our services. This includes your name, email, phone number, and company information when you register or submit inquiries. We do not sell your data to third parties. All information is stored securely and treated with strict confidentiality. We comply with international data protection standards including GDPR principles.</p>
                 </div>
                 <div>
-                    <h3 class="text-black font-bold uppercase text-xs tracking-widest mb-4">02. IP Address & Referral Tracking</h3>
-                    <p>To provide accurate referral attribution and partner commission tracking, we collect your IP address when you visit through a referral link or register as a partner. This data is used exclusively for tracking unique visitors, verifying conversions, and calculating commissions. Your IP address is never shared with third parties for marketing purposes. We implement security measures to ensure this sensitive data is encrypted and stored securely. Partners may opt into or out of this tracking through their privacy consent settings during registration.</p>
+                    <h3 class="text-black font-bold uppercase text-xs tracking-widest mb-4">02. Analytics & Performance</h3>
+                    <p>We use analytics to understand how visitors interact with our site and improve our services. This includes tracking page views, user interactions, and general usage patterns. No personally identifiable information is collected through analytics, and all data is aggregated and anonymized.</p>
                 </div>
                 <div>
                     <h3 class="text-black font-bold uppercase text-xs tracking-widest mb-4">03. Geolocation & Currency Detection</h3>
@@ -1420,180 +1067,6 @@
         </div>
     </div>
 
-    <!-- REFERRAL PAGE -->
-    <div id="referral-page" class="hidden-page page-transition bg-white min-h-screen pt-32 pb-20 px-6">
-        <div class="max-w-7xl mx-auto py-24 px-10">
-            <button onclick="showPage('home')" class="text-[0.6rem] font-bold uppercase tracking-widest text-neutral-400 mb-12 flex items-center hover:text-black transition">
-                <i class="fas fa-arrow-left mr-2"></i> Back to Studio
-            </button>
-            
-            <!-- Registration/Login View -->
-            <div id="auth-view">
-                <div class="max-w-md mx-auto">
-                    <h2 class="text-7xl font-black tracking-tighter mb-12">Alliance.</h2>
-                    
-                    <!-- Tab Navigation -->
-                    <div class="flex border-b border-black/10 mb-12">
-                        <button id="register-tab" onclick="switchAuthTab('register')" class="flex-1 pb-4 text-sm font-bold uppercase tracking-widest border-b-2 border-black text-black">
-                            Register
-                        </button>
-                        <button id="login-tab" onclick="switchAuthTab('login')" class="flex-1 pb-4 text-sm font-bold uppercase tracking-widest border-b-2 border-transparent text-neutral-400">
-                            Login
-                        </button>
-                    </div>
-
-                    <!-- Registration Form -->
-                    <div id="register-form" class="space-y-6">
-                        <div>
-                            <input type="text" id="partner-name" placeholder="FULL NAME" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        <div>
-                            <input type="email" id="partner-email" placeholder="EMAIL" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        <div>
-                            <input type="tel" id="partner-phone" placeholder="PHONE NUMBER" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        <div>
-                            <input type="text" id="partner-company" placeholder="COMPANY (OPTIONAL)" class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        <div>
-                            <input type="password" id="partner-password" placeholder="PASSWORD" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        
-                        <div class="border-l-2 border-black pl-6 py-2">
-                            <h4 class="font-bold text-xs uppercase tracking-widest mb-2">Partner Benefits</h4>
-                            <p class="text-neutral-500 text-sm">• 10% commission on all referrals<br>• Permanent tracking system<br>• Marketing materials & support<br>• Real-time analytics dashboard</p>
-                        </div>
-
-                        <div class="flex items-start space-x-2">
-                            <input type="checkbox" id="terms-accepted" required class="mt-1">
-                            <label for="terms-accepted" class="text-xs text-neutral-600">
-                                I agree to the <a href="#" onclick="showPage('legal')" class="underline">Partner Terms & Conditions</a>.
-                            </label>
-                        </div>
-                        <div class="flex items-start space-x-2">
-                            <input type="checkbox" id="privacy-consent" required class="mt-1">
-                            <label for="privacy-consent" class="text-xs text-neutral-600">
-                                I consent to the collection of my IP address for referral attribution. See the <a href="#" onclick="showPage('privacy')" class="underline">Privacy Policy</a>.
-                            </label>
-                        </div>
-                        
-                        <button type="button" onclick="window.registerPartner()" class="btn-black w-full py-5 text-[0.7rem] font-bold uppercase tracking-widest">
-                            Create Alliance Account
-                        </button>
-                    </div>
-
-                    <!-- Login Form -->
-                    <div id="login-form" class="space-y-6 hidden">
-                        <div>
-                            <input type="email" id="login-email" placeholder="EMAIL" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        <div>
-                            <input type="password" id="login-password" placeholder="PASSWORD" required class="w-full bg-transparent border-b border-neutral-200 py-4 text-xs outline-none focus:border-black transition">
-                        </div>
-                        
-                        <button onclick="window.loginPartner()" class="btn-black w-full py-5 text-[0.7rem] font-bold uppercase tracking-widest">
-                            Access Alliance Portal
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Partner Dashboard (shown after login) -->
-            <div id="partner-dashboard" class="hidden">
-                <div class="max-w-7xl mx-auto">
-                    <div class="flex justify-between items-start mb-10">
-                        <div>
-                            <h2 class="text-5xl md:text-6xl font-black tracking-tighter mb-2">Your Alliance.</h2>
-                            <p class="text-base text-neutral-600 font-light">Welcome back, <span id="partner-name-display">Partner</span></p>
-                        </div>
-                        <div class="flex flex-col items-end gap-4">
-                            <button onclick="logoutPartner()" class="text-[0.6rem] font-bold uppercase tracking-widest text-neutral-400 hover:text-black transition">
-                                Logout
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Stats Overview -->
-                    <div class="grid md:grid-cols-4 gap-4 mb-12">
-                        <div class="bg-white p-6 border border-neutral-100 rounded hover:shadow-md transition">
-                            <div id="stat-clicks" class="text-2xl md:text-3xl font-black mb-2">0</div>
-                            <div class="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Unique Clicks</div>
-                        </div>
-                        <div class="bg-white p-6 border border-neutral-100 rounded hover:shadow-md transition">
-                            <div id="stat-conversions" class="text-2xl md:text-3xl font-black mb-2">0</div>
-                            <div class="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Conversions</div>
-                        </div>
-                        <div class="bg-white p-6 border border-neutral-100 rounded hover:shadow-md transition">
-                            <div id="stat-earned" class="text-2xl md:text-3xl font-black mb-2">₵0</div>
-                            <div class="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Total Earned</div>
-                        </div>
-                        <div class="bg-white p-6 border border-neutral-100 rounded hover:shadow-md transition">
-                            <div id="stat-rate" class="text-2xl md:text-3xl font-black mb-2">0%</div>
-                            <div class="text-xs text-neutral-500 uppercase tracking-widest font-semibold">Conversion Rate</div>
-                        </div>
-                    </div>
-
-                    <!-- Referral Code Section -->
-                    <div class="bg-neutral-50 p-8 border border-neutral-200 rounded mb-12">
-                        <div class="flex items-center justify-between mb-6">
-                            <span class="tag text-neutral-400 border-neutral-200">Your Alliance Code</span>
-                            <button id="copy-btn" onclick="copyReferralLink()" class="text-black font-bold text-xs uppercase tracking-widest hover:text-neutral-600 transition">
-                                📋 Copy Link
-                            </button>
-                        </div>
-                        <div id="referral-code" class="text-3xl md:text-4xl font-black tracking-tighter mb-4">BENASA-XXXXXX</div>
-                        <div id="referral-link" class="text-sm text-neutral-600 font-mono bg-white p-4 border border-neutral-300 rounded break-all">
-                            https://benasastudios.com/?ref=BENASA-XXXXXX
-                        </div>
-                    </div>
-
-                    <!-- Marketing Materials -->
-                    <div class="mb-12">
-                        <h3 class="text-2xl md:text-3xl font-black mb-6 tracking-tight">Marketing Materials</h3>
-                        <div class="grid md:grid-cols-1 lg:grid-cols-2 gap-6">
-                            <div class="border border-neutral-200 p-6 rounded bg-white">
-                                <h4 class="font-bold text-sm uppercase tracking-widest mb-4 text-black">Share Messages</h4>
-                                <div class="space-y-3">
-                                    <div class="bg-neutral-50 p-4 text-sm text-neutral-700 rounded border border-neutral-200">
-                                        "Check out Benasa Studios - your remote creative department. Use my code BENASA-XXXXXX for special benefits!"
-                                    </div>
-                                    <div class="bg-neutral-50 p-4 text-sm text-neutral-700 rounded border border-neutral-200">
-                                        "I've been working with Benasa Studios and they're amazing. Use my referral code BENASA-XXXXXX to get started!"
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="border border-neutral-200 p-6 rounded bg-white">
-                                <h4 class="font-bold text-sm uppercase tracking-widest mb-4 text-black">Quick Share</h4>
-                                <div class="flex flex-col space-y-2">
-                                    <button onclick="shareOnTwitter()" class="w-full py-3 border border-neutral-300 text-black text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition rounded">
-                                        <i class="fab fa-twitter mr-2"></i> Share on Twitter
-                                    </button>
-                                    <button onclick="shareOnLinkedIn()" class="w-full py-3 border border-neutral-300 text-black text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition rounded">
-                                        <i class="fab fa-linkedin mr-2"></i> Share on LinkedIn
-                                    </button>
-                                    <button onclick="shareByEmail()" class="w-full py-3 border border-neutral-300 text-black text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition rounded">
-                                        <i class="fas fa-envelope mr-2"></i> Share by Email
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Recent Activity -->
-                    <div class="border-t border-neutral-200 pt-12">
-                        <h3 class="text-2xl md:text-3xl font-black mb-6 tracking-tight">Recent Activity</h3>
-                        <div id="activity-log" class="space-y-4">
-                            <div class="text-center py-8 text-neutral-400 bg-neutral-50 rounded border border-neutral-200">
-                                <p class="text-sm font-light">No recent activity</p>
-                                <p class="text-xs mt-2">Start sharing your referral link to see results here</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <div class="comparison section-padding bg-neutral-50">
         <div class="max-w-7xl mx-auto px-6 lg:px-12">
@@ -1849,97 +1322,11 @@
             </div>
         </div>
     </section>
-
-    <!-- Alliance Partner Modal -->
-    <div id="allianceModal" class="modal" role="dialog" aria-labelledby="modal-title" aria-modal="true">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeModal()" aria-label="Close modal" title="Close (Esc)">&times;</button>
-            <h2 id="modal-title" class="text-4xl font-bold mb-2">Become an Alliance Partner</h2>
-            <p class="text-lg text-neutral-600 mb-8">Earn 10% recurring commission on every referral</p>
-            
-            <div class="mb-10">
-                <h3 class="font-bold text-lg mb-4 uppercase tracking-wider">How It Works</h3>
-                <ul class="space-y-3 text-sm text-neutral-700">
-                    <li class="flex items-start">
-                        <span class="font-bold mr-3">1.</span>
-                        <span>Sign up with your unique referral code</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="font-bold mr-3">2.</span>
-                        <span>Share your code with potential clients</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="font-bold mr-3">3.</span>
-                        <span>Track referrals in your partner dashboard</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="font-bold mr-3">4.</span>
-                        <span>Earn 10% on all projects from your referrals</span>
-                    </li>
-                </ul>
-            </div>
-
-            <div class="mb-10">
-                <h3 class="font-bold text-lg mb-4 uppercase tracking-wider">What You Get</h3>
-                <ul class="space-y-3 text-sm text-neutral-700">
-                    <li class="flex items-start">
-                        <span class="mr-3">✓</span>
-                        <span><strong>recurring 10% commission</strong> on all referral revenue</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="mr-3">✓</span>
-                        <span><strong>partner dashboard</strong> to track all conversions in real time</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="mr-3">✓</span>
-                        <span><strong>marketing templates</strong> to make sharing easier</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="mr-3">✓</span>
-                        <span><strong>priority support</strong> from our team</span>
-                    </li>
-                    <li class="flex items-start">
-                        <span class="mr-3">✓</span>
-                        <span><strong>bonus tier</strong> - earn extra 5% when you bring 5+ active referrals</span>
-                    </li>
-                </ul>
-            </div>
-
-            <div class="mb-10 p-4 bg-neutral-50 rounded border border-neutral-200">
-                <p class="text-sm text-neutral-600 font-light">
-                    <strong>Active partners:</strong> 23 • <strong>Total paid:</strong> ₵47,000+
-                </p>
-            </div>
-
-            <!-- Quick Signup Form -->
-            <div class="space-y-4 mb-6">
-                <input type="text" id="modal-partner-name" placeholder="FULL NAME" class="w-full bg-transparent border-b border-neutral-200 py-3 text-xs outline-none focus:border-black transition" required>
-                <input type="email" id="modal-partner-email" placeholder="EMAIL" class="w-full bg-transparent border-b border-neutral-200 py-3 text-xs outline-none focus:border-black transition" required>
-                <input type="tel" id="modal-partner-phone" placeholder="PHONE" class="w-full bg-transparent border-b border-neutral-200 py-3 text-xs outline-none focus:border-black transition" required>
-            </div>
-
-            <div class="flex items-start space-x-2 mb-6">
-                <input type="checkbox" id="modal-terms" class="mt-1" required>
-                <label for="modal-terms" class="text-xs text-neutral-600">
-                    I accept the Partnership Terms and Privacy Policy
-                </label>
-            </div>
-
-            <button onclick="quickSignupFromModal()" class="btn-black w-full py-4 text-sm font-bold uppercase tracking-widest mb-3">
-                Get Started (Free)
-            </button>
-            <button onclick="showPage('referral'); closeModal();" class="btn-black w-full py-4 text-sm font-bold uppercase tracking-widest border border-black bg-white text-black hover:bg-neutral-50">
-                Full Registration
-            </button>
-        </div>
-    </div>
-
-    <!-- Testimonial Slider Section -->
     <section class="section-padding bg-white relative">
         <div class="max-w-7xl mx-auto px-6 lg:px-12">
             <div class="text-center mb-16">
-                <h2 class="text-4xl font-extrabold tracking-tighter mb-4">Love from Partners</h2>
-                <p class="text-neutral-600 font-light">Hear from teams already earning with Benasa</p>
+                <h2 class="text-4xl font-extrabold tracking-tighter mb-4">Client Success Stories</h2>
+                <p class="text-neutral-600 font-light">Hear from teams working with Benasa</p>
             </div>
 
             <div class="relative">
@@ -1994,7 +1381,7 @@
                                     <span class="text-yellow-400">★★★★★</span>
                                 </div>
                                 <p class="text-neutral-700 font-light mb-6 italic flex-grow">
-                                    "Refer friends, earn passive income. It's a win-win. We've earned ₵50K this year just by recommending."
+                                    "The quality is exceptional. They remember our brand guidelines, assets, and preferences. No ramp-up time."
                                 </p>
                                 <div class="font-bold text-sm">David Mensah</div>
                                 <p class="text-xs text-neutral-500">Creative Director, BrandStudio</p>
@@ -2033,7 +1420,7 @@
                     </div>
                     <div class="space-y-2 text-xs text-neutral-500 font-bold uppercase tracking-widest">
                         <p><a href="#pricing" onclick="showPage('home')" class="hover:text-black transition">Pricing</a> • <a href="#model" onclick="showPage('home')" class="hover:text-black transition">About</a></p>
-                        <p><a href="#" onclick="showPage('referral')" class="hover:text-black transition">Alliance</a> • <a href="#contact" onclick="showPage('home')" class="hover:text-black transition">Contact</a></p>
+                        <p><a href="#contact" onclick="showPage('home')" class="hover:text-black transition">Contact</a></p>
                     </div>
                 </div>
                 <div>
@@ -2069,7 +1456,6 @@
                 <div class="flex space-x-12 mt-6 md:mt-0">
                     <button onclick="showPage('privacy')">Privacy</button>
                     <button onclick="showPage('legal')">Legal</button>
-                    <a href="dashboard.html" class="hover:text-black transition">Studio Plus</a>
                 </div>
             </div>
         </div>
@@ -2194,13 +1580,62 @@
             renderer.setSize(container.offsetWidth, container.offsetHeight);
         });
 
-        // Initialize on load
-        initGlobe();
-        autoDetectCurrency();
-        
-        // Initialize partner tracking system
-        trackingSystem.initialize();
-        checkPartnerAuth();
+        // Promo Modal Functions
+        function checkMarchPromo() {
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth(); // 0 = January, 2 = March
+            const currentYear = currentDate.getFullYear();
+            
+            // Check if it's March 2026
+            if (currentMonth === 2 && currentYear === 2026) {
+                // Check if user has already dismissed the promo
+                const promoDismissed = localStorage.getItem('march_promo_dismissed');
+                if (!promoDismissed) {
+                    // Show promo after 3 seconds
+                    setTimeout(() => {
+                        showPromoModal();
+                    }, 3000);
+                }
+            }
+        }
+
+        function showPromoModal() {
+            const modal = document.getElementById('promo-modal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                document.body.style.overflow = 'hidden'; // Prevent background scrolling
+            }
+        }
+
+        function closePromoModal() {
+            const modal = document.getElementById('promo-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                document.body.style.overflow = 'auto'; // Restore scrolling
+                // Remember that user dismissed the promo
+                localStorage.setItem('march_promo_dismissed', 'true');
+            }
+        }
+
+        function toggleMobileMenu() {
+            const mobileMenu = document.getElementById('mobile-menu');
+            const mobileBtn = document.getElementById('mobile-menu-btn');
+            
+            if (mobileMenu.classList.contains('hidden')) {
+                mobileMenu.classList.remove('hidden');
+                mobileBtn.classList.add('active');
+            } else {
+                mobileMenu.classList.add('hidden');
+                mobileBtn.classList.remove('active');
+            }
+        }
+
+        // Initialize on page load
+        window.onload = function() {
+            initGlobe();
+            autoDetectCurrency();
+            checkMarchPromo();
+        }
         
         // Scroll reveal logic
         const observer = new IntersectionObserver((entries) => {
@@ -2220,7 +1655,7 @@
 
         // UI Logic
         function showPage(pageId) {
-            const pages = ['home-page', 'legal-page', 'privacy-page', 'referral-page'];
+            const pages = ['home-page', 'legal-page', 'privacy-page'];
             pages.forEach(p => {
                 const el = document.getElementById(p);
                 if (p === pageId + '-page') {
@@ -2231,178 +1666,8 @@
                     el.style.display = 'none';
                 }
             });
-            // Toggle main nav links visibility when showing the referral portal
-            try {
-                const mainNav = document.getElementById('main-nav-links');
-                if (pageId === 'referral') {
-                    if (mainNav) mainNav.style.display = 'none';
-                } else {
-                    if (mainNav) mainNav.style.display = '';
-                }
-            } catch (e) { /* no-op */ }
 
             window.scrollTo({top: 0, behavior: 'smooth'});
-        }
-
-        // Partner Authentication Functions
-        function switchAuthTab(tab) {
-            const registerTab = document.getElementById('register-tab');
-            const loginTab = document.getElementById('login-tab');
-            const registerForm = document.getElementById('register-form');
-            const loginForm = document.getElementById('login-form');
-
-            if (tab === 'register') {
-                registerTab.classList.add('border-black', 'text-black');
-                registerTab.classList.remove('border-transparent', 'text-neutral-400');
-                loginTab.classList.add('border-transparent', 'text-neutral-400');
-                loginTab.classList.remove('border-black', 'text-black');
-                registerForm.classList.remove('hidden');
-                loginForm.classList.add('hidden');
-            } else {
-                loginTab.classList.add('border-black', 'text-black');
-                loginTab.classList.remove('border-transparent', 'text-neutral-400');
-                registerTab.classList.add('border-transparent', 'text-neutral-400');
-                registerTab.classList.remove('border-black', 'text-black');
-                loginForm.classList.remove('hidden');
-                registerForm.classList.add('hidden');
-            }
-        }
-
-        function logoutPartner() {
-            console.log('=== LOGOUT PARTNER START ===');
-            
-            // Sign out from Firebase Auth
-            auth.signOut().then(() => {
-                console.log('Firebase Auth sign out successful');
-            }).catch((error) => {
-                console.error('Firebase Auth sign out error:', error);
-            });
-            
-            // Clear local storage
-            localStorage.removeItem('benasa_partner_id');
-            localStorage.removeItem('benasa_partner_data');
-            trackingSystem.partnerData = null;
-            
-            // Hide dashboard and show registration form
-            document.getElementById('partner-dashboard').classList.add('hidden');
-            document.getElementById('register-form').classList.remove('hidden');
-            document.getElementById('register-tab').click(); // Switch to register tab
-            
-            console.log('=== LOGOUT PARTNER COMPLETE ===');
-        }
-
-        function showPartnerDashboard(partnerData) {
-            trackingSystem.partnerData = partnerData;
-            
-            // Update dashboard with partner data
-            document.getElementById('partner-name-display').textContent = partnerData.name;
-            document.getElementById('referral-code').textContent = partnerData.referralCode;
-            document.getElementById('referral-link').textContent = partnerData.marketingMaterials.referralLink;
-            
-            // Update stats
-            document.getElementById('stat-clicks').textContent = partnerData.stats.uniqueClicks || 0;
-            document.getElementById('stat-conversions').textContent = partnerData.stats.conversions || 0;
-            document.getElementById('stat-earned').textContent = '₵' + (partnerData.stats.totalEarned || 0);
-            
-            const conversionRate = partnerData.stats.uniqueClicks > 0 
-                ? Math.round((partnerData.stats.conversions / partnerData.stats.uniqueClicks) * 100) 
-                : 0;
-            document.getElementById('stat-rate').textContent = conversionRate + '%';
-
-            // Show dashboard, hide auth
-            document.getElementById('auth-view').classList.add('hidden');
-            document.getElementById('partner-dashboard').classList.remove('hidden');
-        }
-
-        // Check if partner is already logged in when page loads
-        async function checkPartnerAuth() {
-            if (trackingSystem.isPartnerLoggedIn()) {
-                const uid = localStorage.getItem(trackingSystem.STORAGE.PARTNER_ID);
-                if (!uid) return;
-                try {
-                    const partnerDoc = await db.collection(trackingSystem.COLLECTIONS.PARTNERS).doc(uid).get();
-                    if (partnerDoc.exists) {
-                        const partnerData = partnerDoc.data();
-                        trackingSystem.partnerData = partnerData;
-                        showPartnerDashboard(partnerData);
-                        return;
-                    }
-                } catch (e) {
-                    console.error('Error fetching partner data on load:', e);
-                }
-
-                // Fallback to minimal stored partner info (marketing links)
-                const stored = trackingSystem.getCurrentPartner();
-                if (stored) {
-                    // Stored object may be limited; populate minimal UI
-                    showPartnerDashboard(stored);
-                }
-            }
-        }
-
-        // Referral functionality (updated for partner system)
-        let referralCode = '';
-
-        function generateReferralCode() {
-            // This function is now handled by the partner registration system
-            alert('Please register as a partner to get your referral code');
-        }
-
-        function copyReferralLink() {
-            const link = document.getElementById('referral-link').textContent;
-            const btn = document.getElementById('copy-btn');
-            const originalText = btn.innerText;
-            
-            // Use modern Clipboard API with fallback
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(link).then(() => {
-                    btn.innerText = "COPIED";
-                    setTimeout(() => btn.innerText = originalText, 2000);
-                }).catch(() => {
-                    // Fallback to legacy method if clipboard API fails
-                    fallbackCopyToClipboard(link, btn, originalText);
-                });
-            } else {
-                // Fallback for older browsers or non-secure contexts
-                fallbackCopyToClipboard(link, btn, originalText);
-            }
-        }
-        
-        function fallbackCopyToClipboard(text, btn, originalText) {
-            const el = document.createElement('textarea');
-            el.value = text;
-            el.style.position = 'fixed';
-            el.style.opacity = '0';
-            document.body.appendChild(el);
-            el.select();
-            try {
-                document.execCommand('copy');
-                btn.innerText = "COPIED";
-                setTimeout(() => btn.innerText = originalText, 2000);
-            } catch (err) {
-                console.error('Failed to copy:', err);
-            }
-            document.body.removeChild(el);
-        }
-
-        function shareOnTwitter() {
-            const partnerData = trackingSystem.getCurrentPartner() || { referralCode: 'BENASA-XXXXXX' };
-            const text = `Check out Benasa Studios - your remote creative department. Use my code ${partnerData.referralCode} for special benefits!`;
-            const url = `https://benasastudios.com/?ref=${partnerData.referralCode}`;
-            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
-        }
-
-        function shareOnLinkedIn() {
-            const partnerData = trackingSystem.getCurrentPartner() || { referralCode: 'BENASA-XXXXXX' };
-            const url = `https://benasastudios.com/?ref=${partnerData.referralCode}`;
-            window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(url)}`, '_blank');
-        }
-
-        function shareByEmail() {
-            const partnerData = trackingSystem.getCurrentPartner() || { referralCode: 'BENASA-XXXXXX' };
-            const subject = 'Benasa Studios - Your Remote Creative Department';
-            const body = `I wanted to share Benasa Studios with you. They're an elite remote creative department that integrates directly into companies.\n\nUse my referral code: ${partnerData.referralCode}\n\nVisit: https://benasastudios.com/?ref=${partnerData.referralCode}`;
-            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         }
 
         async function autoDetectCurrency() {
@@ -2427,7 +1692,7 @@
                     });
                 }
             } catch (e) {
-                console.warn('Currency detection failed, using default pricing');
+                // Currency detection failed, using default pricing
             }
         }
 
@@ -2477,160 +1742,7 @@
         }
         
         // Form submission is handled by Netlify automatically since we removed custom JS prevention
-
-        function openModal() {
-            const modal = document.getElementById('allianceModal');
-            if (!modal) return; // Safety check
-            
-            modal.style.display = 'block';
-            modal.focus();
-            // Focus first input for accessibility
-            setTimeout(() => document.getElementById('modal-partner-name')?.focus(), 100);
-            
-            // Trap focus within modal
-            const focusableElements = modal.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])');
-            if (focusableElements.length === 0) return; // Safety check
-            
-            const firstFocus = focusableElements[0];
-            const lastFocus = focusableElements[focusableElements.length - 1];
-            
-            modal.addEventListener('keydown', function modalTabTrap(e) {
-                if (e.key !== 'Tab') return;
-                if (e.shiftKey) {
-                    if (document.activeElement === firstFocus) {
-                        lastFocus.focus();
-                        e.preventDefault();
-                    }
-                } else {
-                    if (document.activeElement === lastFocus) {
-                        firstFocus.focus();
-                        e.preventDefault();
-                    }
-                }
-            });
-        }
-
-        function closeModal() {
-            const modal = document.getElementById('allianceModal');
-            if (modal) modal.style.display = 'none';
-            // Return focus to trigger button
-            document.querySelector('.earn-badge')?.focus();
-        }
-
-        // Parse referral tracking from URL
-        function trackReferralSource() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const referrerCode = urlParams.get('ref');
-            if (referrerCode) {
-                console.log('Referral session started with code:', referrerCode);
-                localStorage.setItem('referralSource', referrerCode);
-                localStorage.setItem('referralSourceDate', new Date().toISOString());
-            }
-        }
-        trackReferralSource();
-
-        // Form state handlers
-        function showSuccessMessage(msg) {
-            const formEl = document.getElementById('register-form');
-            if (!formEl) return;
-            const successDiv = document.createElement('div');
-            successDiv.className = 'bg-green-50 border border-green-200 rounded p-4 text-green-700 text-sm font-light mb-4';
-            successDiv.innerText = msg;
-            formEl.parentNode.insertBefore(successDiv, formEl);
-            setTimeout(() => successDiv.remove(), 3000);
-        }
-
-        function showErrorMessage(msg) {
-            const formEl = document.getElementById('register-form');
-            if (!formEl) return;
-            const errorDiv = document.createElement('div');
-            errorDiv.className = 'bg-red-50 border border-red-200 rounded p-4 text-red-700 text-sm font-light mb-4';
-            errorDiv.innerText = msg;
-            formEl.parentNode.insertBefore(errorDiv, formEl);
-            setTimeout(() => errorDiv.remove(), 5000);
-        }
-
-        // Escape key closes modal
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                const modal = document.getElementById('allianceModal');
-                if (modal && modal.style.display === 'block') {
-                    closeModal();
-                }
-            }
-        });
-
-        // Quick signup from modal
-        function quickSignupFromModal() {
-            const nameEl = document.getElementById('modal-partner-name');
-            const emailEl = document.getElementById('modal-partner-email');
-            const phoneEl = document.getElementById('modal-partner-phone');
-            const termsEl = document.getElementById('modal-terms');
-            
-            if (!nameEl || !emailEl || !phoneEl || !termsEl) {
-                alert('Form elements not found. Please try again.');
-                return;
-            }
-            
-            const name = nameEl.value.trim();
-            const email = emailEl.value.trim();
-            const phone = phoneEl.value.trim();
-            const termsAccepted = termsEl.checked;
-
-            if (!name || !email || !phone) {
-                alert('Please fill in all fields');
-                return;
-            }
-
-            if (!termsAccepted) {
-                alert('Please accept the terms');
-                return;
-            }
-
-            // Basic validation
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-                alert('Please enter a valid email');
-                return;
-            }
-
-            if (!/^\+?[\d\s().-]{7,}$/.test(phone)) {
-                alert('Please enter a valid phone number');
-                return;
-            }
-
-            // Store temp data and go to full form
-            localStorage.setItem('quickSignup', JSON.stringify({ name, email, phone }));
-            showPage('referral');
-            closeModal();
-            
-            // Auto-fill the referral form fields if they exist
-            setTimeout(() => {
-                const partnerNameEl = document.getElementById('partner-name');
-                const partnerEmailEl = document.getElementById('partner-email');
-                const partnerPhoneEl = document.getElementById('partner-phone');
-                if (partnerNameEl) partnerNameEl.value = name;
-                if (partnerEmailEl) partnerEmailEl.value = email;
-                if (partnerPhoneEl) partnerPhoneEl.value = phone;
-            }, 100);
-        }
-
-        window.onclick = function(event) {
-            const modal = document.getElementById('allianceModal');
-            if (modal && event.target == modal) {
-                closeModal();
-            }
-        }
-
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                if (target) {
-                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            });
-        });
-
+       
         // Currency Toggle Handler
         document.querySelectorAll('.currency-btn').forEach(button => {
             button.addEventListener('click', function() {
