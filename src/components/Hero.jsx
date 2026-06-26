@@ -5,46 +5,135 @@ const Hero = () => {
     const canvasRef = useRef(null);
 
     useEffect(() => {
-        // Basic Three.js initialization (placeholder for the full globe logic)
         if (!canvasRef.current) return;
         
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-        
-        renderer.setSize(canvasRef.current.clientWidth, canvasRef.current.clientHeight);
-        canvasRef.current.appendChild(renderer.domElement);
-        
-        const geometry = new THREE.SphereGeometry(2, 32, 32);
-        const material = new THREE.MeshBasicMaterial({ color: 0xcccccc, wireframe: true });
-        const sphere = new THREE.Mesh(geometry, material);
-        scene.add(sphere);
-        
-        camera.position.z = 5;
-        
-        const animate = function () {
-            requestAnimationFrame(animate);
-            sphere.rotation.x += 0.005;
-            sphere.rotation.y += 0.005;
+        const container = canvasRef.current;
+        let scene, camera, renderer, globe, points, lines = [];
+
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, container.offsetWidth / container.offsetHeight, 0.1, 1000);
+        camera.position.z = 250;
+
+        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(container.offsetWidth, container.offsetHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        // Create dotted globe
+        const radius = 90;
+        const segments = 40;
+        const rings = 40;
+        const geometry = new THREE.BufferGeometry();
+        const positions = [];
+
+        for (let i = 0; i <= rings; i++) {
+            const phi = i * Math.PI / rings;
+            for (let j = 0; j <= segments; j++) {
+                const theta = j * 2 * Math.PI / segments;
+                const x = radius * Math.sin(phi) * Math.cos(theta);
+                const y = radius * Math.cos(phi);
+                const z = radius * Math.sin(phi) * Math.sin(theta);
+                positions.push(x, y, z);
+            }
+        }
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({ color: 0x000000, size: 0.8, transparent: true, opacity: 0.15 });
+        globe = new THREE.Points(geometry, material);
+        scene.add(globe);
+
+        // Specific City Hubs (lat, lon) -> (x, y, z)
+        const hubs = [
+            { name: 'Accra', lat: 5.6037, lon: -0.1870 },
+            { name: 'London', lat: 51.5074, lon: -0.1278 },
+            { name: 'New York', lat: 40.7128, lon: -74.0060 },
+            { name: 'Dubai', lat: 25.2048, lon: 55.2708 },
+            { name: 'Tokyo', lat: 35.6762, lon: 139.6503 },
+            { name: 'San Francisco', lat: 37.7749, lon: -122.4194 }
+        ];
+
+        const coords = hubs.map(h => {
+            const phi = (90 - h.lat) * (Math.PI / 180);
+            const theta = (h.lon + 180) * (Math.PI / 180);
+            return new THREE.Vector3(
+                -radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.cos(phi),
+                radius * Math.sin(phi) * Math.sin(theta)
+            );
+        });
+
+        // Add highlight points
+        const hubGeometry = new THREE.BufferGeometry().setFromPoints(coords);
+        const hubMaterial = new THREE.PointsMaterial({ color: 0x000000, size: 3 });
+        const hubPoints = new THREE.Points(hubGeometry, hubMaterial);
+        globe.add(hubPoints);
+
+        function createConnection(start, end) {
+            const curve = new THREE.QuadraticBezierCurve3(
+                start,
+                start.clone().multiplyScalar(1.4).add(end.clone().multiplyScalar(1.4)).multiplyScalar(0.5),
+                end
+            );
+            const points = curve.getPoints(50);
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.1 });
+            const line = new THREE.Line(geometry, material);
+            globe.add(line);
+            
+            // Animated dash
+            const dashGeom = new THREE.BufferGeometry().setFromPoints(points.slice(0, 5));
+            const dashMat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4 });
+            const dash = new THREE.Line(dashGeom, dashMat);
+            dash.userData = { points, offset: 0 };
+            globe.add(dash);
+            lines.push(dash);
+        }
+
+        // Connect Accra (hubs[0]) to others
+        const accra = coords[0];
+        for (let i = 1; i < coords.length; i++) {
+            createConnection(accra, coords[i]);
+        }
+
+        let animationFrameId;
+
+        function animate() {
+            animationFrameId = requestAnimationFrame(animate);
+            globe.rotation.y += 0.001;
+            globe.rotation.x += 0.0005;
+
+            lines.forEach(dash => {
+                dash.userData.offset = (dash.userData.offset + 1) % dash.userData.points.length;
+                const startIdx = dash.userData.offset;
+                const endIdx = (startIdx + 5) % dash.userData.points.length;
+                const segment = endIdx > startIdx 
+                    ? dash.userData.points.slice(startIdx, endIdx)
+                    : [...dash.userData.points.slice(startIdx), ...dash.userData.points.slice(0, endIdx)];
+                dash.geometry.setFromPoints(segment);
+            });
+
             renderer.render(scene, camera);
-        };
-        
+        }
+
         animate();
 
         const handleResize = () => {
-            if (!canvasRef.current) return;
-            camera.aspect = canvasRef.current.clientWidth / canvasRef.current.clientHeight;
+            if (!container) return;
+            camera.aspect = container.offsetWidth / container.offsetHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(canvasRef.current.clientWidth, canvasRef.current.clientHeight);
+            renderer.setSize(container.offsetWidth, container.offsetHeight);
         };
 
         window.addEventListener('resize', handleResize);
 
         return () => {
             window.removeEventListener('resize', handleResize);
-            if (canvasRef.current) {
-                canvasRef.current.innerHTML = '';
+            cancelAnimationFrame(animationFrameId);
+            if (container && renderer.domElement) {
+                container.removeChild(renderer.domElement);
             }
+            // Cleanup Three.js resources
+            scene.clear();
+            renderer.dispose();
         };
     }, []);
 

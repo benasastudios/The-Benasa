@@ -1,4 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
+
+const FaqItem = ({ question, answer }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    
+    return (
+        <div className="faq-item">
+            <div className="faq-question" onClick={() => setIsOpen(!isOpen)} style={{ cursor: 'pointer' }}>
+                {question} <span>{isOpen ? '-' : '+'}</span>
+            </div>
+            {isOpen && (
+                <div className="faq-answer" style={{ display: 'block' }}>
+                    {answer}
+                </div>
+            )}
+        </div>
+    );
+};
 
 export default function Pricing() {
   return (
@@ -173,40 +190,34 @@ export default function Pricing() {
                 </div>
 
                 <div className="faq">
-                    <div className="faq-item">
-                        <div className="faq-question">What counts as "one request"? <span>+</span></div>
-                        <div className="faq-answer">One design asset or one page. Example: A logo is one request. A 3-slide pitch deck is one request. A 10-page website is ~10 requests delivered sequentially.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">How is this different from hiring a freelancer? <span>+</span></div>
-                        <div className="faq-answer">Freelancers disappear. We're a studio—if your designer is sick, someone else picks it up. You get reliability, not heroics.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">How is this different from an agency? <span>+</span></div>
-                        <div className="faq-answer">Agencies charge $10K+ per project and take weeks. We're embedded in your workflow for a flat monthly fee. Think in-house team, not project-based vendor.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">What if I only need work sometimes? <span>+</span></div>
-                        <div className="faq-answer">Take the Starter tier for one-off projects, or use Standard and pause when you don't need us. You only pay for active months.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">Do you work with international clients? <span>+</span></div>
-                        <div className="faq-answer">Yes. 60% of our clients are outside Ghana (UK, US, Nigeria, Kenya, Canada). Time zones have never been an issue.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">What happens to my files? <span>+</span></div>
-                        <div className="faq-answer">You own everything. All source files, fonts, code—it's yours. We'll never use your work in our portfolio without permission.</div>
-                    </div>
-
-                    <div className="faq-item">
-                        <div className="faq-question">What if we're not a good fit? <span>+</span></div>
-                        <div className="faq-answer">Cancel anytime with 7 days notice. If you're unhappy in your first month, we'll refund you. We'd rather lose money than ruin our reputation.</div>
-                    </div>
+                    <FaqItem 
+                        question='What counts as "one request"?' 
+                        answer="One design asset or one page. Example: A logo is one request. A 3-slide pitch deck is one request. A 10-page website is ~10 requests delivered sequentially."
+                    />
+                    <FaqItem 
+                        question="How is this different from hiring a freelancer?" 
+                        answer="Freelancers disappear. We're a studio—if your designer is sick, someone else picks it up. You get reliability, not heroics."
+                    />
+                    <FaqItem 
+                        question="How is this different from an agency?" 
+                        answer="Agencies charge $10K+ per project and take weeks. We're embedded in your workflow for a flat monthly fee. Think in-house team, not project-based vendor."
+                    />
+                    <FaqItem 
+                        question="What if I only need work sometimes?" 
+                        answer="Take the Starter tier for one-off projects, or use Standard and pause when you don't need us. You only pay for active months."
+                    />
+                    <FaqItem 
+                        question="Do you work with international clients?" 
+                        answer="Yes. 60% of our clients are outside Ghana (UK, US, Nigeria, Kenya, Canada). Time zones have never been an issue."
+                    />
+                    <FaqItem 
+                        question="What happens to my files?" 
+                        answer="You own everything. All source files, fonts, code—it's yours. We'll never use your work in our portfolio without permission."
+                    />
+                    <FaqItem 
+                        question="What if we're not a good fit?" 
+                        answer="Cancel anytime with 7 days notice. If you're unhappy in your first month, we'll refund you. We'd rather lose money than ruin our reputation."
+                    />
                 </div>
             </div>
         </section>
