@@ -78,11 +78,11 @@ const server = http.createServer((req, res) => {
   // Serve static files (fallback to index)
   let filePath;
   if (req.url === '/') {
-    filePath = path.join(__dirname, 'index.html');
+    filePath = path.join(__dirname, 'public', 'index.html');
   } else {
     // strip query string
     const cleanUrl = req.url.split('?')[0];
-    filePath = path.join(__dirname, cleanUrl);
+    filePath = path.join(__dirname, 'public', cleanUrl);
   }
 
   const extname = String(path.extname(filePath)).toLowerCase();

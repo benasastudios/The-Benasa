@@ -2,7 +2,7 @@
 import re
 
 # Read the file
-with open('index.html', 'r', encoding='utf-8') as f:
+with open('public/index.html', 'r', encoding='utf-8') as f:
     content = f.read()
 
 # Find and replace the form section
@@ -57,7 +57,7 @@ else:
     print("✗ Earn 10% button wiring not found")
 
 # Write the file back
-with open('index.html', 'w', encoding='utf-8') as f:
+with open('public/index.html', 'w', encoding='utf-8') as f:
     f.write(content)
 
-print("✓ index.html updated successfully")
+print("✓ public/index.html updated successfully")
